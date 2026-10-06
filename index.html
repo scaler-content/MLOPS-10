@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CI/CD Part 2 Post Read</title>
+<meta name="description" content="Making a working pipeline safe to trust — rulesets, a model-quality gate, staging and production environments, rollback, and failure notifications.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0a0b;
+  --bg-soft:#0f0f10;
+  --surface:#161617;
+  --surface-2:#1c1c1e;
+  --surface-3:#242426;
+  --border:#2b2b2d;
+  --border-soft:#1f1f21;
+  --text:#ecebe7;
+  --text-dim:#aeaaa1;
+  --text-dimmer:#79756d;
+  --gold:#d6ad54;
+  --gold-bright:#f0c878;
+  --gold-soft:rgba(214,173,84,0.14);
+  --gold-line:rgba(214,173,84,0.35);
+  --red:#c2695c;
+  --red-soft:rgba(194,105,92,0.13);
+  --green:#7fa387;
+  --green-soft:rgba(127,163,135,0.13);
+  --serif:'Fraunces',Georgia,'Times New Roman',serif;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace;
+  --radius:14px;
+  --maxw:860px;
+}
+*,*::before,*::after{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  font-size:16px;
+  line-height:1.68;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+body::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:0;
+  background:
+    radial-gradient(ellipse 900px 500px at 15% -5%, rgba(214,173,84,0.07), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 100% 10%, rgba(214,173,84,0.05), transparent 55%);
+}
+a{color:var(--gold-bright);text-decoration-color:rgba(240,200,120,0.35);text-underline-offset:3px;}
+a:hover{text-decoration-color:var(--gold-bright);}
+:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:4px;}
+img,svg{max-width:100%;display:block;}
+.container{max-width:var(--maxw);margin:0 auto;padding:0 24px;}
+.wide{max-width:1020px;}
+
+/* ---------- top chrome ---------- */
+#progress{
+  position:fixed;top:0;left:0;height:3px;width:0%;
+  background:linear-gradient(90deg,var(--gold-line),var(--gold-bright));
+  z-index:1000;transition:width .08s linear;
+}
+header.site-header{
+  position:sticky;top:0;z-index:900;
+  background:rgba(10,10,11,0.86);
+  backdrop-filter:blur(10px) saturate(1.1);
+  border-bottom:1px solid var(--border-soft);
+}
+.header-inner{
+  max-width:1020px;margin:0 auto;padding:13px 24px;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+}
+.brand{
+  font-family:var(--serif);font-weight:600;font-size:15px;letter-spacing:0.02em;color:var(--text);
+  display:flex;align-items:center;gap:9px;white-space:nowrap;
+  min-width:0;overflow:hidden;flex:1 1 auto;
+}
+.brand .dot{width:7px;height:7px;border-radius:50%;background:var(--gold);box-shadow:0 0 10px var(--gold-bright);flex:none;}
+.brand .btext{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.brand small{color:var(--text-dimmer);font-family:var(--sans);font-weight:500;font-size:12px;letter-spacing:0.03em;}
+#tocToggle{
+  font-family:var(--sans);font-size:13px;font-weight:600;letter-spacing:0.02em;
+  background:var(--surface-2);color:var(--text);border:1px solid var(--border);
+  padding:8px 14px;border-radius:999px;cursor:pointer;display:flex;align-items:center;gap:8px;
+  flex:none;
+}
+#tocToggle:hover{border-color:var(--gold-line);color:var(--gold-bright);}
+@media(max-width:480px){
+  .header-inner{padding:12px 16px;gap:10px;}
+  .brand{font-size:13.5px;}
+  .brand small{display:none;}
+  #tocToggle{padding:7px 11px;font-size:12px;gap:6px;}
+}
+
+#tocPanel{
+  position:fixed;inset:0;z-index:950;
+  background:rgba(6,6,7,0.78);backdrop-filter:blur(3px);
+  display:none;align-items:flex-start;justify-content:center;
+  padding:80px 20px 40px;
+}
+#tocPanel.open{display:flex;}
+.toc-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:16px;
+  width:100%;max-width:560px;max-height:76vh;overflow-y:auto;padding:10px;
+  box-shadow:0 30px 80px rgba(0,0,0,0.6);
+}
+.toc-card-head{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:12px 14px 10px;border-bottom:1px solid var(--border-soft);margin-bottom:6px;
+}
+.toc-card-head span{font-family:var(--serif);font-size:15px;color:var(--gold-bright);}
+.toc-close{background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;line-height:1;padding:4px 8px;}
+.toc-close:hover{color:var(--gold-bright);}
+.toc-list{list-style:none;margin:0;padding:4px;}
+.toc-list a{
+  display:flex;align-items:baseline;gap:10px;padding:9px 12px;border-radius:8px;
+  color:var(--text-dim);text-decoration:none;font-size:14px;
+}
+.toc-list a:hover,.toc-list a:focus-visible{background:var(--surface-2);color:var(--gold-bright);}
+.toc-list .n{font-family:var(--mono);font-size:11px;color:var(--text-dimmer);flex:none;width:20px;}
+.toc-list a.current{color:var(--gold-bright);}
+
+/* ---------- hero ---------- */
+.hero{padding:76px 0 52px;position:relative;z-index:1;}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;
+  font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:var(--gold);
+  border:1px solid var(--gold-line);background:var(--gold-soft);
+  padding:6px 13px;border-radius:999px;font-weight:600;margin-bottom:26px;
+}
+h1.title{
+  font-family:var(--serif);font-weight:600;font-style:normal;
+  font-size:clamp(2.1rem,5.4vw,3.4rem);line-height:1.08;letter-spacing:-0.01em;
+  margin:0 0 18px;color:var(--text);
+}
+h1.title em{font-style:italic;color:var(--gold-bright);}
+.dek{font-size:clamp(1.02rem,2vw,1.2rem);color:var(--text-dim);max-width:640px;margin:0 0 30px;font-weight:400;}
+.hero-meta{display:flex;flex-wrap:wrap;gap:22px;color:var(--text-dimmer);font-size:13px;}
+.hero-meta span{display:flex;align-items:center;gap:7px;}
+.hero-meta svg{width:14px;height:14px;opacity:0.8;}
+hr.rule{border:none;border-top:1px solid var(--border-soft);margin:52px 0;}
+
+/* ---------- sections ---------- */
+section{padding:10px 0 56px;position:relative;z-index:1;scroll-margin-top:78px;}
+.section-kicker{
+  font-family:var(--mono);font-size:12px;color:var(--gold);letter-spacing:0.08em;
+  text-transform:uppercase;margin:0 0 10px;display:block;
+}
+h2{
+  font-family:var(--serif);font-weight:600;font-size:clamp(1.5rem,3.2vw,2rem);
+  line-height:1.2;margin:0 0 20px;color:var(--text);letter-spacing:-0.01em;
+}
+h3{font-family:var(--serif);font-weight:600;font-size:1.22rem;color:var(--text);margin:30px 0 12px;}
+h4{font-family:var(--sans);font-weight:700;font-size:0.98rem;color:var(--gold-bright);margin:22px 0 8px;letter-spacing:0.01em;}
+p{margin:0 0 17px;color:var(--text-dim);}
+section > .container > p:first-of-type{font-size:1.07rem;color:var(--text);}
+strong{color:var(--text);font-weight:600;}
+em{color:var(--gold-bright);font-style:italic;}
+ul,ol{color:var(--text-dim);padding-left:22px;margin:0 0 17px;}
+li{margin-bottom:7px;}
+code.inline, .mono-term{
+  font-family:var(--mono);font-size:0.86em;background:var(--surface-2);
+  border:1px solid var(--border);color:var(--gold-bright);
+  padding:1.5px 6px;border-radius:5px;white-space:nowrap;
+}
+abbr{text-decoration:underline dotted rgba(214,173,84,0.5);text-underline-offset:3px;cursor:help;}
+blockquote{
+  margin:24px 0;padding:4px 0 4px 20px;border-left:2px solid var(--gold-line);
+  color:var(--text-dim);font-style:italic;font-family:var(--serif);font-size:1.08rem;
+}
+
+/* callouts */
+.callout{
+  border:1px solid var(--border);background:var(--surface);border-radius:var(--radius);
+  padding:20px 22px;margin:24px 0;position:relative;
+}
+.callout.gold{border-color:var(--gold-line);background:linear-gradient(180deg,var(--gold-soft),transparent 70%);}
+.callout.red{border-color:rgba(194,105,92,0.4);background:linear-gradient(180deg,var(--red-soft),transparent 70%);}
+.callout.green{border-color:rgba(127,163,135,0.4);background:linear-gradient(180deg,var(--green-soft),transparent 70%);}
+.callout-label{
+  font-family:var(--mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;
+  color:var(--gold);display:flex;align-items:center;gap:8px;margin-bottom:9px;font-weight:600;
+}
+.callout.red .callout-label{color:var(--red);}
+.callout.green .callout-label{color:var(--green);}
+.callout p:last-child{margin-bottom:0;}
+
+/* objectives checklist */
+.obj-list{list-style:none;padding:0;margin:0 0 6px;display:grid;gap:8px;}
+.obj{
+  display:flex;align-items:flex-start;gap:12px;padding:12px 14px;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  cursor:pointer;user-select:none;transition:border-color .15s, background .15s;
+}
+.obj:hover{border-color:var(--gold-line);}
+.obj .box{
+  flex:none;width:19px;height:19px;border-radius:5px;border:1.5px solid var(--text-dimmer);
+  margin-top:2px;display:flex;align-items:center;justify-content:center;transition:all .15s;
+}
+.obj .box svg{width:11px;height:11px;opacity:0;transform:scale(0.6);transition:all .15s;}
+.obj.done .box{background:var(--gold);border-color:var(--gold);}
+.obj.done .box svg{opacity:1;transform:scale(1);stroke:#0a0a0b;}
+.obj.done span.t{color:var(--text-dimmer);text-decoration:line-through;text-decoration-color:var(--border);}
+.obj span.t{font-size:14.5px;color:var(--text-dim);line-height:1.5;}
+
+/* glossary chip row */
+.chiprow{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 28px;}
+.chip{
+  font-family:var(--mono);font-size:12px;color:var(--gold-bright);
+  border:1px solid var(--gold-line);background:var(--gold-soft);
+  padding:5px 11px;border-radius:999px;
+}
+
+/* ---------- card grids ---------- */
+.grid{display:grid;gap:14px;margin:22px 0;}
+.grid.cols-2{grid-template-columns:repeat(2,1fr);}
+.grid.cols-3{grid-template-columns:repeat(3,1fr);}
+.grid.cols-4{grid-template-columns:repeat(4,1fr);}
+@media(max-width:720px){.grid.cols-2,.grid.cols-3,.grid.cols-4{grid-template-columns:1fr;}}
+@media(min-width:721px) and (max-width:900px){.grid.cols-4{grid-template-columns:repeat(2,1fr);}}
+.card{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:18px 19px;
+}
+.card h4{margin-top:0;}
+.card p{font-size:14.5px;margin-bottom:0;}
+.card .num{
+  font-family:var(--serif);font-size:1.6rem;color:var(--gold-line);margin-bottom:6px;font-weight:600;
+}
+
+/* compare cards */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:24px 0;}
+@media(max-width:700px){.compare{grid-template-columns:1fr;}}
+.compare .side{border-radius:12px;padding:19px 20px;border:1px solid var(--border);background:var(--surface);}
+.compare .side.old{opacity:0.88;}
+.compare .side.new{border-color:var(--gold-line);background:linear-gradient(180deg,var(--gold-soft),var(--surface) 65%);}
+.compare .tag{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dimmer);display:block;margin-bottom:6px;}
+.compare .side.new .tag{color:var(--gold);}
+.compare h4{margin-top:2px;}
+.compare ul{margin-bottom:0;padding-left:18px;}
+.compare li{font-size:14px;}
+
+/* ---------- code viewer ---------- */
+.codepanel{
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:12px;
+  overflow:hidden;margin:20px 0;
+}
+.codepanel-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:9px 14px;border-bottom:1px solid var(--border-soft);background:var(--surface);
+}
+.codepanel-tabs{display:flex;gap:4px;flex-wrap:wrap;}
+.codetab{
+  font-family:var(--mono);font-size:11.5px;color:var(--text-dimmer);background:transparent;
+  border:1px solid transparent;padding:5px 10px;border-radius:7px;cursor:pointer;
+}
+.codetab:hover{color:var(--text-dim);}
+.codetab[aria-selected="true"]{color:var(--gold-bright);background:var(--gold-soft);border-color:var(--gold-line);}
+.copy-btn{
+  font-family:var(--sans);font-size:11.5px;color:var(--text-dimmer);background:transparent;
+  border:1px solid var(--border);padding:5px 10px;border-radius:7px;cursor:pointer;flex:none;
+}
+.copy-btn:hover{color:var(--gold-bright);border-color:var(--gold-line);}
+.codepanel pre{
+  margin:0;padding:17px 18px;overflow-x:auto;display:none;
+}
+.codepanel pre.active{display:block;}
+.codepanel code{
+  font-family:var(--mono);font-size:12.8px;line-height:1.65;color:#d8d5ce;white-space:pre;
+}
+.tok-comment{color:var(--text-dimmer);}
+.tok-key{color:var(--gold-bright);}
+.tok-string{color:#c9a876;}
+.tok-expr{color:#8fb3d9;}
+.tok-kw{color:var(--gold-bright);}
+.tok-err{color:var(--red);font-weight:600;}
+.tok-ok{color:var(--green);font-weight:600;}
+.line{display:block;border-radius:4px;transition:background .15s;}
+.line.lit{background:rgba(214,173,84,0.1);box-shadow:-3px 0 0 var(--gold) inset;padding-left:9px;margin-left:-9px;}
+.codepanel figcaption{
+  font-family:var(--sans);font-size:12px;color:var(--text-dimmer);padding:9px 18px 13px;border-top:1px solid var(--border-soft);
+}
+
+/* ---------- stepper ---------- */
+.stepper{margin:28px 0;}
+.steps-track{
+  display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:18px;
+  scrollbar-width:thin;
+}
+.step-btn{
+  flex:1 1 0;min-width:78px;background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:12px 8px 10px;cursor:pointer;text-align:center;color:var(--text-dimmer);
+  transition:all .15s;
+}
+.step-btn .sn{
+  font-family:var(--serif);font-size:1.15rem;font-weight:600;color:var(--text-dimmer);
+  display:block;margin-bottom:4px;
+}
+.step-btn small{display:block;font-size:10.5px;line-height:1.3;color:var(--text-dimmer);}
+.step-btn:hover{border-color:var(--gold-line);}
+.step-btn.active{background:var(--gold-soft);border-color:var(--gold);}
+.step-btn.active .sn,.step-btn.active small{color:var(--gold-bright);}
+.step-detail{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:20px 22px;position:relative;
+}
+.step-detail .sd-label{font-family:var(--mono);font-size:11px;color:var(--gold);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;display:block;}
+.step-detail h4{margin:0 0 9px;font-family:var(--serif);font-size:1.15rem;color:var(--text);}
+.step-detail p{margin:0;font-size:14.5px;}
+
+/* ---------- timeline ---------- */
+.timeline{display:flex;flex-wrap:wrap;gap:0;margin:26px 0;counter-reset:tl;}
+.tl-item{flex:1 1 150px;position:relative;padding:0 18px 18px 0;}
+.tl-item::before{
+  counter-increment:tl;content:counter(tl);
+  width:26px;height:26px;border-radius:50%;background:var(--surface-2);border:1px solid var(--gold-line);
+  color:var(--gold-bright);font-family:var(--mono);font-size:12px;font-weight:600;
+  display:flex;align-items:center;justify-content:center;margin-bottom:10px;
+}
+.tl-item h5{font-family:var(--sans);font-weight:700;font-size:13.5px;color:var(--text);margin:0 0 5px;}
+.tl-item p{font-size:12.8px;color:var(--text-dim);margin:0;}
+
+/* ---------- 4-col process flow (reused pattern) ---------- */
+.flow4{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin:28px 0 10px;}
+@media(max-width:800px){.flow4{grid-template-columns:1fr;}}
+.flow4 .fstep{background:var(--surface);border:1px solid var(--border);padding:18px 16px;position:relative;}
+.flow4 .fstep:not(:last-child){border-right:none;}
+@media(max-width:800px){.flow4 .fstep:not(:last-child){border-right:1px solid var(--border);border-bottom:none;}}
+.flow4 .fstep:first-child{border-radius:12px 0 0 12px;}
+.flow4 .fstep:last-child{border-radius:0 12px 12px 0;}
+@media(max-width:800px){
+  .flow4 .fstep:first-child{border-radius:12px 12px 0 0;}
+  .flow4 .fstep:last-child{border-radius:0 0 12px 12px;}
+}
+.flow4 .fi-n{
+  font-family:var(--mono);font-size:11px;color:var(--gold);background:var(--gold-soft);
+  border:1px solid var(--gold-line);width:22px;height:22px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;margin-bottom:12px;
+}
+.flow4 h5{font-size:13.5px;font-family:var(--sans);font-weight:700;color:var(--text);margin:0 0 6px;}
+.flow4 p{font-size:12.6px;color:var(--text-dim);margin:0;}
+.flow4 .fstep::after{
+  content:"";position:absolute;right:-9px;top:50%;transform:translateY(-50%);
+  width:0;height:0;border-top:7px solid transparent;border-bottom:7px solid transparent;
+  border-left:9px solid var(--border);z-index:2;
+}
+.flow4 .fstep:last-child::after{display:none;}
+@media(max-width:800px){
+  .flow4 .fstep::after{right:50%;top:auto;bottom:-9px;transform:translateX(50%) rotate(90deg);}
+}
+
+/* old vs new / side-by-side compare with arrow */
+.pair-compare{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:center;margin:26px 0;}
+@media(max-width:700px){.pair-compare{grid-template-columns:1fr;}.pair-compare .vs{display:none;}}
+.pair-compare .vs{font-family:var(--serif);font-style:italic;color:var(--text-dimmer);font-size:14px;}
+
+/* architecture / pipeline diagrams */
+.diagram-frame{
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px;margin:26px 0;overflow-x:auto;
+}
+/* Diagrams keep a legible, near-native pixel size and scroll horizontally on
+   narrow screens instead of shrinking their labels into illegibility. */
+.diagram-frame svg{max-width:none;width:auto;height:auto;display:block;margin:0 auto;}
+.diagram-frame svg text{font-family:var(--sans);}
+.diagram-caption{font-size:12.5px;color:var(--text-dimmer);text-align:center;margin-top:10px;}
+
+/* ---------- accordion ---------- */
+.accordion{border-top:1px solid var(--border);margin:22px 0;}
+.acc-item{border-bottom:1px solid var(--border);}
+.acc-head{
+  width:100%;display:flex;align-items:center;justify-content:space-between;gap:14px;
+  background:none;border:none;color:var(--text);text-align:left;cursor:pointer;
+  padding:17px 4px;font-family:var(--sans);font-size:15px;font-weight:600;
+}
+.acc-head:hover{color:var(--gold-bright);}
+.acc-head .plus{
+  flex:none;width:22px;height:22px;border-radius:50%;border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;color:var(--gold);position:relative;transition:transform .2s;
+}
+.acc-head .plus::before,.acc-head .plus::after{content:"";position:absolute;background:var(--gold);}
+.acc-head .plus::before{width:9px;height:1.4px;}
+.acc-head .plus::after{width:1.4px;height:9px;transition:transform .2s;}
+.acc-head[aria-expanded="true"] .plus::after{transform:scaleY(0);}
+.acc-head[aria-expanded="true"] .plus{border-color:var(--gold-line);background:var(--gold-soft);}
+.acc-panel{max-height:0;overflow:hidden;transition:max-height .25s ease;}
+.acc-panel-inner{padding:0 4px 20px;font-size:14.5px;color:var(--text-dim);}
+.acc-panel-inner p:last-child{margin-bottom:0;}
+
+/* ---------- table ---------- */
+.tbl-wrap{overflow-x:auto;margin:22px 0;border:1px solid var(--border);border-radius:12px;}
+table{width:100%;border-collapse:collapse;font-size:13.6px;min-width:560px;}
+thead th{
+  text-align:left;font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--gold);background:var(--surface-2);padding:12px 15px;border-bottom:1px solid var(--border);
+}
+tbody td{padding:13px 15px;border-bottom:1px solid var(--border-soft);color:var(--text-dim);vertical-align:top;}
+tbody tr:last-child td{border-bottom:none;}
+tbody td code.inline{white-space:normal;}
+tbody tr:hover{background:var(--surface);}
+
+/* ---------- failure / scenario tabs ---------- */
+.fail-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:24px 0 18px;}
+.fail-tab{
+  font-family:var(--sans);font-size:13px;font-weight:600;color:var(--text-dimmer);
+  background:var(--surface);border:1px solid var(--border);padding:9px 14px;border-radius:9px;cursor:pointer;
+  display:flex;align-items:center;gap:8px;
+}
+.fail-tab .fi{width:7px;height:7px;border-radius:50%;background:var(--text-dimmer);flex:none;}
+.fail-tab:hover{border-color:var(--gold-line);color:var(--text);}
+.fail-tab[aria-selected="true"]{background:var(--gold-soft);border-color:var(--gold-line);color:var(--gold-bright);}
+.fail-tab[aria-selected="true"] .fi{background:var(--gold-bright);}
+.fail-panel{display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px 26px;}
+.fail-panel.active{display:block;}
+.fail-meta{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin:18px 0;}
+@media(max-width:640px){.fail-meta{grid-template-columns:1fr;}}
+.fail-meta .fm{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:10px;padding:13px 15px;}
+.fail-meta .fm .fm-label{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dimmer);margin-bottom:5px;}
+.fail-meta .fm p{font-size:13.3px;margin:0;color:var(--text-dim);}
+.fail-panel .log{
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;
+  padding:13px 15px;font-family:var(--mono);font-size:12.3px;color:#cfcbc2;line-height:1.6;margin:14px 0;
+  overflow-x:auto;white-space:pre;
+}
+
+/* ---------- bar comparison (model-gate data viz) ---------- */
+.barchart{margin:22px 0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:22px 24px;}
+.barchart h5{font-family:var(--sans);font-weight:700;font-size:13px;color:var(--text);margin:0 0 4px;}
+.barchart .bsub{font-size:12.5px;color:var(--text-dimmer);margin-bottom:18px;}
+.bargroup{margin-bottom:20px;}
+.bargroup:last-child{margin-bottom:0;}
+.bargroup .blabel{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--text-dim);margin-bottom:6px;}
+.bargroup .blabel .bval{font-family:var(--mono);font-weight:600;color:var(--text);}
+.bar-track{position:relative;height:28px;background:var(--surface-2);border-radius:7px;overflow:visible;border:1px solid var(--border-soft);}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--gold-line),var(--gold));position:relative;transition:width .6s ease;}
+.bar-fill.fail{background:linear-gradient(90deg,rgba(194,105,92,0.55),var(--red));}
+.bar-fill .bar-tag{
+  position:absolute;right:-1px;top:50%;transform:translate(100%,-50%);
+  font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text-dimmer);white-space:nowrap;padding-left:8px;
+}
+.bar-floor{
+  position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--text-dimmer);
+}
+.bar-floor::after{
+  content:attr(data-label);position:absolute;top:-20px;left:50%;transform:translateX(-50%);
+  font-family:var(--mono);font-size:10px;color:var(--text-dimmer);white-space:nowrap;
+}
+.bar-verdict{
+  display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10.5px;font-weight:700;
+  letter-spacing:.04em;padding:2px 8px;border-radius:999px;margin-left:10px;vertical-align:middle;
+}
+.bar-verdict.pass{color:var(--green);background:var(--green-soft);border:1px solid rgba(127,163,135,0.4);}
+.bar-verdict.fail{color:var(--red);background:var(--red-soft);border:1px solid rgba(194,105,92,0.4);}
+
+/* file tree */
+.filetree{
+  font-family:var(--mono);font-size:13px;color:var(--text-dim);background:var(--bg-soft);
+  border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin:22px 0;
+}
+.filetree div{padding:3px 0;}
+.filetree .f-root{color:var(--gold-bright);font-weight:600;}
+.filetree .f-child{padding-left:22px;color:var(--text-dim);}
+.filetree .f-comment{color:var(--text-dimmer);font-style:italic;margin-left:10px;font-size:12px;}
+
+/* next-up / info cards */
+.nextcard{display:flex;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:17px 19px;}
+.nextcard .ni{
+  flex:none;width:38px;height:38px;border-radius:10px;background:var(--gold-soft);border:1px solid var(--gold-line);
+  display:flex;align-items:center;justify-content:center;color:var(--gold-bright);font-family:var(--serif);font-weight:700;
+}
+.nextcard h4{margin:0 0 5px;}
+.nextcard p{font-size:13.5px;margin:0;}
+
+/* TL;DR box */
+.tldr{
+  border:1px solid var(--gold-line);border-radius:var(--radius);
+  background:linear-gradient(135deg,var(--gold-soft),transparent 75%);
+  padding:24px 26px;margin:24px 0;
+}
+.tldr .callout-label{margin-bottom:12px;}
+.tldr p:last-child{margin-bottom:0;}
+
+/* refs */
+.ref-group{margin-bottom:26px;}
+.ref-group h4{color:var(--text);margin-bottom:10px;}
+.ref-list{list-style:none;padding:0;margin:0;display:grid;gap:7px;}
+.ref-list li{border-bottom:1px solid var(--border-soft);padding-bottom:7px;font-size:14px;color:var(--text-dim);}
+.ref-list a{color:var(--text);font-weight:500;}
+.ref-list a:hover{color:var(--gold-bright);}
+.ref-list .d{color:var(--text-dimmer);font-size:12.8px;display:block;margin-top:2px;}
+
+/* footer */
+footer{border-top:1px solid var(--border-soft);padding:46px 0 60px;margin-top:20px;position:relative;z-index:1;}
+footer .container{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;}
+footer .fbrand{font-family:var(--serif);font-weight:600;font-size:16px;color:var(--text);display:flex;align-items:center;gap:9px;}
+footer .fbrand .dot{width:6px;height:6px;border-radius:50%;background:var(--gold);}
+footer p{color:var(--text-dimmer);font-size:13px;margin:0;max-width:440px;}
+.back-top{
+  font-family:var(--sans);font-size:12.5px;color:var(--text-dimmer);border:1px solid var(--border);
+  padding:8px 16px;border-radius:999px;cursor:pointer;background:var(--surface);margin-top:8px;
+}
+.back-top:hover{color:var(--gold-bright);border-color:var(--gold-line);}
+
+::-webkit-scrollbar{height:8px;width:8px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:var(--gold-line);}
+</style>
+</head>
+<body>
+
+<div id="progress"></div>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="brand"><span class="dot"></span><span class="btext">CI/CD Part 2 Post Read<small>&nbsp;· Pipelines on AWS</small></span></div>
+    <button id="tocToggle" aria-haspopup="dialog" aria-controls="tocPanel">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="14" y2="17"/></svg>
+      Contents
+    </button>
+  </div>
+</header>
+
+<div id="tocPanel" role="dialog" aria-label="Table of contents" aria-modal="true">
+  <div class="toc-card">
+    <div class="toc-card-head">
+      <span>Contents</span>
+      <button class="toc-close" id="tocClose" aria-label="Close">&times;</button>
+    </div>
+    <ul class="toc-list" id="tocList">
+      <li><a href="#intro"><span class="n">00</span>Where Part 1 left off</a></li>
+      <li><a href="#project"><span class="n">01</span>Production, again</a></li>
+      <li><a href="#rulesets"><span class="n">02</span>Rules GitHub enforces</a></li>
+      <li><a href="#gate"><span class="n">03</span>A gate for the model</a></li>
+      <li><a href="#environments"><span class="n">04</span>Two environments</a></li>
+      <li><a href="#staged-release"><span class="n">05</span>Staging first, then production</a></li>
+      <li><a href="#rollback"><span class="n">06</span>Rolling back on purpose</a></li>
+      <li><a href="#notify"><span class="n">07</span>Being told when it breaks</a></li>
+      <li><a href="#blindspot"><span class="n">08</span>What no check here can see</a></li>
+      <li><a href="#failures"><span class="n">09</span>What goes wrong</a></li>
+      <li><a href="#teardown"><span class="n">10</span>Tearing it down</a></li>
+      <li><a href="#summary"><span class="n">11</span>Key takeaways</a></li>
+      <li><a href="#refs"><span class="n">12</span>References</a></li>
+    </ul>
+  </div>
+</div>
+
+<main>
+
+  <!-- ===================== HERO ===================== -->
+  <section class="hero">
+    <div class="container">
+      <span class="eyebrow">CI/CD · GitHub Actions · Amazon ECS — Part 2 of 2</span>
+      <h1 class="title">A pipeline that works isn't yet a pipeline you can <em>trust</em></h1>
+      <p class="dek">Part 1 built a pipeline that tests and deploys. Nothing stopped a red pull request from being merged, production was the first place an image ever ran, there was no fast way back from a bad release, and failures on <code class="inline">main</code> reached no one. This is how all four get closed — plus the one hole that's specific to a model: the pipeline learning to judge whether it's any good.</p>
+      <div class="hero-meta">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>~35–40 min read</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>Part 2 of 2 — builds directly on Part 1</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21l2-7.5L2 9h7z"/></svg>Release governance · model gates</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== INTRO ===================== -->
+  <section id="intro">
+    <div class="container">
+      <span class="section-kicker">Why this exists</span>
+      <h2>Four holes in a working pipeline — and a fifth only a model has</h2>
+      <p>Part 1 ended with every pull request tested, and every merge to <code class="inline">main</code> that passed going live with no person in between. That shape is right, and a real team would still refuse to trust it with production traffic, for four reasons that have nothing to do with whether the pipeline <em>works</em>.</p>
+
+      <div class="grid cols-2">
+        <div class="card"><h4>Nothing is enforced</h4><p>A red check is advice. The <strong>Merge</strong> button still works, and anyone with write access can push straight to <code class="inline">main</code>.</p></div>
+        <div class="card"><h4>Production is the first place the image runs</h4><p>Tests run on a fresh checkout, never on the built image. Part 1 showed a change where every test passed and the image still had no model in it.</p></div>
+        <div class="card"><h4>There's no quick way back</h4><p>The circuit breaker rolls back tasks that crash. It can't help with a release that starts fine and simply answers badly.</p></div>
+        <div class="card"><h4>Nobody is told</h4><p>Test results reach a pull request's reviewer. A failed run on <code class="inline">main</code>, after everyone's moved on, reaches no one.</p></div>
+      </div>
+
+      <p>A machine-learning service has a fifth hole none of those checks even look for. Every one of them examines <em>code</em>. None asks whether the model is any good — before a release or after it. A model trained last month can pass every test today and still be quietly wrong, because the pumps it scores tomorrow aren't the pumps it learned from. This post closes the first four holes completely, and the half of the fifth that fits before a release.</p>
+
+      <h3>Where this ends up</h3>
+      <p>Every change now takes the same solid path: a pull request, two required checks, a staging copy of the service with a smoke test, a person's approval, and only then production. A second, dashed path — monitoring the live model and retraining it — comes later in the course, and feeds back into the same pull-request path rather than going around it.</p>
+
+      <div class="diagram-frame">
+        <svg viewBox="0 0 1100 330" width="1100" height="330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Release flow diagram. Top row, solid: pull request, then two required checks (test and model-gate), then a staging deploy with a smoke test, then a person's approval, then production. Bottom row, dashed, labelled as coming later in the course: production feeds live answers to continuous monitoring, which watches for drift and triggers continuous training, which produces a retrained model that re-enters as an ordinary pull request.">
+          <defs>
+            <marker id="arrS" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#d6ad54"/></marker>
+            <marker id="arrG" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#79756d"/></marker>
+          </defs>
+          <text x="10" y="22" fill="#79756d" font-size="10.5" letter-spacing="1">THIS SESSION — EVERY RELEASE</text>
+
+          <!-- top row -->
+          <rect x="10" y="36" width="140" height="58" rx="9" fill="#161617" stroke="#2b2b2d"/>
+          <text x="80" y="60" fill="#ecebe7" font-size="12.5" text-anchor="middle" font-weight="700">Pull request</text>
+          <text x="80" y="77" fill="#79756d" font-size="9.5" text-anchor="middle">a change proposed</text>
+
+          <rect x="200" y="30" width="160" height="70" rx="9" fill="#1c1c1e" stroke="#d6ad54" stroke-opacity="0.5"/>
+          <text x="280" y="50" fill="#ecebe7" font-size="12" text-anchor="middle" font-weight="700">2 required checks</text>
+          <text x="280" y="67" fill="#aeaaa1" font-size="10" text-anchor="middle">test</text>
+          <text x="280" y="82" fill="#aeaaa1" font-size="10" text-anchor="middle">model-gate</text>
+
+          <rect x="410" y="30" width="170" height="70" rx="9" fill="#161617" stroke="#2b2b2d"/>
+          <text x="495" y="52" fill="#ecebe7" font-size="12.5" text-anchor="middle" font-weight="700">Staging</text>
+          <text x="495" y="69" fill="#79756d" font-size="9.5" text-anchor="middle">deploy + smoke test</text>
+          <text x="495" y="84" fill="#79756d" font-size="9.5" text-anchor="middle">checked from outside</text>
+
+          <rect x="630" y="30" width="150" height="70" rx="9" fill="#1c1c1e" stroke="#2b2b2d" stroke-dasharray="3 3"/>
+          <text x="705" y="56" fill="#ecebe7" font-size="12.5" text-anchor="middle" font-weight="700">Approval</text>
+          <text x="705" y="73" fill="#79756d" font-size="9.5" text-anchor="middle">a reviewer, by hand</text>
+
+          <rect x="830" y="30" width="150" height="70" rx="9" fill="#161617" stroke="#d6ad54" stroke-opacity="0.6"/>
+          <text x="905" y="52" fill="#ecebe7" font-size="12.5" text-anchor="middle" font-weight="700">Production</text>
+          <text x="905" y="69" fill="#79756d" font-size="9.5" text-anchor="middle">same image,</text>
+          <text x="905" y="83" fill="#79756d" font-size="9.5" text-anchor="middle">immutable tag</text>
+
+          <line x1="150" y1="65" x2="198" y2="65" stroke="#d6ad54" stroke-width="1.6" marker-end="url(#arrS)"/>
+          <line x1="360" y1="65" x2="408" y2="65" stroke="#d6ad54" stroke-width="1.6" marker-end="url(#arrS)"/>
+          <line x1="580" y1="65" x2="628" y2="65" stroke="#d6ad54" stroke-width="1.6" marker-end="url(#arrS)"/>
+          <line x1="780" y1="65" x2="828" y2="65" stroke="#d6ad54" stroke-width="1.6" marker-end="url(#arrS)"/>
+
+          <!-- bottom row, dashed, later in the course -->
+          <text x="10" y="230" fill="#79756d" font-size="10.5" letter-spacing="1">LATER IN THE COURSE — AFTER A RELEASE</text>
+
+          <rect x="630" y="244" width="150" height="60" rx="9" fill="none" stroke="#3a3a3c" stroke-dasharray="4 3"/>
+          <text x="705" y="268" fill="#aeaaa1" font-size="11.5" text-anchor="middle" font-weight="700">Monitoring</text>
+          <text x="705" y="284" fill="#79756d" font-size="9" text-anchor="middle">live answers vs. outcomes</text>
+
+          <rect x="410" y="244" width="170" height="60" rx="9" fill="none" stroke="#3a3a3c" stroke-dasharray="4 3"/>
+          <text x="495" y="268" fill="#aeaaa1" font-size="11.5" text-anchor="middle" font-weight="700">Drift detected</text>
+          <text x="495" y="284" fill="#79756d" font-size="9" text-anchor="middle">a station the model misses</text>
+
+          <rect x="200" y="244" width="160" height="60" rx="9" fill="none" stroke="#3a3a3c" stroke-dasharray="4 3"/>
+          <text x="280" y="268" fill="#aeaaa1" font-size="11.5" text-anchor="middle" font-weight="700">Retraining</text>
+          <text x="280" y="284" fill="#79756d" font-size="9" text-anchor="middle">a new model candidate</text>
+
+          <line x1="905" y1="100" x2="705" y2="242" fill="none" stroke="#54514b" stroke-width="1.3" stroke-dasharray="3 3" marker-end="url(#arrG)"/>
+          <line x1="630" y1="274" x2="582" y2="274" stroke="#54514b" stroke-width="1.3" stroke-dasharray="3 3" marker-end="url(#arrG)"/>
+          <line x1="410" y1="274" x2="362" y2="274" stroke="#54514b" stroke-width="1.3" stroke-dasharray="3 3" marker-end="url(#arrG)"/>
+          <path d="M280,244 C280,160 150,140 85,98" fill="none" stroke="#54514b" stroke-width="1.3" stroke-dasharray="3 3" marker-end="url(#arrG)"/>
+          <text x="140" y="175" fill="#79756d" font-size="9.5" text-anchor="middle">re-enters as an</text>
+          <text x="140" y="188" fill="#79756d" font-size="9.5" text-anchor="middle">ordinary pull request</text>
+        </svg>
+        <p class="diagram-caption">The solid row is what this post builds. The dashed row closes the loop later in the course — and plugs into this path rather than going around it.</p>
+      </div>
+
+      <div class="tldr callout gold">
+        <div class="callout-label"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z"/></svg>What you'll be able to do after this</div>
+        <ul class="obj-list" id="objList">
+          <li class="obj" tabindex="0" role="checkbox" aria-checked="false"><span class="box"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span class="t">Protect <code class="inline">main</code> with a ruleset, so every change goes through a pull request and can't merge until named checks pass.</span></li>
+          <li class="obj" tabindex="0" role="checkbox" aria-checked="false"><span class="box"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span class="t">Add a model-quality gate that scores a change against <code class="inline">main</code> on a fixed holdout set, and blocks a worse model.</span></li>
+          <li class="obj" tabindex="0" role="checkbox" aria-checked="false"><span class="box"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span class="t">Split a deploy into <code class="inline">staging</code> and <code class="inline">production</code> environments, each with its own secret, role and rules.</span></li>
+          <li class="obj" tabindex="0" role="checkbox" aria-checked="false"><span class="box"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span class="t">Smoke-test staging from outside, then release the exact same image to production once a reviewer approves.</span></li>
+          <li class="obj" tabindex="0" role="checkbox" aria-checked="false"><span class="box"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span class="t">Roll production back to an earlier release in one workflow run — and explain why that's never the whole fix.</span></li>
+          <li class="obj" tabindex="0" role="checkbox" aria-checked="false"><span class="box"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span class="t">Open an issue automatically when the pipeline fails on <code class="inline">main</code>, so a red run always finds an owner.</span></li>
+          <li class="obj" tabindex="0" role="checkbox" aria-checked="false"><span class="box"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span><span class="t">Explain what none of these checks can see once a model is live, and why that calls for monitoring and retraining.</span></li>
+        </ul>
+      </div>
+
+      <p style="font-size:14px;color:var(--text-dimmer);">Assumes everything from Part 1 — workflows, jobs, <code class="inline">needs:</code>, <code class="inline">permissions:</code>, the ECR repository with immutable tags, and OIDC. Nothing here is new about Docker, ECS or IAM; what's new is how the pieces are arranged.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===================== 1. PROJECT / PRODUCTION AGAIN ===================== -->
+  <section id="project">
+    <div class="container">
+      <span class="section-kicker">01 — Picking up where Part 1 ended</span>
+      <h2>The same service, production rebuilt once by hand</h2>
+      <p>The code is the same pump-health service, in a fresh repository, carrying Part 1's tests and pipeline forward and adding three things this session needs.</p>
+
+      <div class="filetree">
+        <div class="f-root">mlops-cicd-pump-health-2/</div>
+        <div class="f-child">pumps.py <span class="f-comment">— stands in for the pumps; makes the readings the model trains on</span></div>
+        <div class="f-child">data/holdout.csv <span class="f-comment">— 5,000 labelled readings no model is ever trained on</span></div>
+        <div class="f-child">infra/up.sh, infra/down.sh <span class="f-comment">— Part 1's AWS commands, collected into two scripts</span></div>
+      </div>
+
+      <p>A pipeline only ever <em>updates</em> a service — it can't create one. So, exactly as in Part 1, production has to exist before any pipeline run. <code class="inline">infra/up.sh production</code> does that in one shot: the network, the ECR repository with immutable tags, the OIDC provider, the cluster, the load balancer, the first image, the service, and Part 1's deploy role. Every command checks first whether its resource already exists, so running the script twice changes nothing.</p>
+
+      <div class="callout gold">
+        <div class="callout-label">Verifying it landed</div>
+        <p>One request settles it, exactly as in Part 1: <code class="inline">curl $PROD_URL/health</code> should report a <code class="inline">git_sha</code> matching <code class="inline">git rev-parse HEAD</code>. From this point on, nothing reaches production by hand again — every later change in this post goes out through the pipeline.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===================== 2. RULESETS ===================== -->
+  <section id="rulesets">
+    <div class="container wide">
+      <span class="section-kicker">02 — Closing the first hole</span>
+      <h2>Rules GitHub enforces</h2>
+      <p>The first hole is the easiest to close, because GitHub closes it for you once you ask. The tool is a <strong>ruleset</strong> — a list of rules GitHub applies to a branch, for everyone, admins included, unless someone is explicitly named to bypass it. It runs on the server, so no setting on anyone's laptop can get around it.</p>
+
+      <h3>What <code class="inline">protect main</code> turns on</h3>
+      <div class="grid cols-3">
+        <div class="card"><div class="num">01</div><h4>No deleting, no rewriting</h4><p><strong>Restrict deletions</strong> and <strong>block force pushes</strong> — nobody can delete <code class="inline">main</code> or rewrite its history, ever.</p></div>
+        <div class="card"><div class="num">02</div><h4>Pull requests only</h4><p><strong>Require a pull request before merging.</strong> Required approvals stays at 0 for a solo repository; a team sets it to 1 or more, so a second person reads every change.</p></div>
+        <div class="card"><div class="num">03</div><h4>Named checks must pass</h4><p><strong>Require status checks to pass</strong>, naming <code class="inline">test</code> — the job's ID in <code class="inline">pipeline.yml</code>. The <strong>Merge</strong> button stays grey until it's green.</p></div>
+      </div>
+
+      <div class="callout gold">
+        <div class="callout-label">Two settings worth a second look</div>
+        <p><strong>Required approvals</strong> is how many people <em>other than the author</em> must approve — a team of one can't use it meaningfully, a team of two already should. <strong>Require branches to be up to date before merging</strong> is left off here: turned on, a pull request re-runs its checks every time <code class="inline">main</code> moves, which is safer and slower. Both are fair choices; what matters is that everyone on the team knows which one is in effect.</p>
+      </div>
+
+      <h3>Proof it's real, not advisory</h3>
+      <p>With the ruleset active, committing straight to <code class="inline">main</code> and pushing is refused at the server, before the commit ever lands:</p>
+      <div class="callout red">
+        <div class="callout-label">Direct push, refused</div>
+        <div class="log" style="margin-top:4px;">! [remote rejected] main -> main (protected branch hook declined)
+remote: — Changes must be made through a pull request.
+remote: — Required status check "test" is expected.</div>
+      </div>
+      <p style="font-size:14px;">The commit still exists locally, so it gets reset away too (<code class="inline">git reset --hard origin/main</code>). From here on, every change — in this post and in a real team — goes through a pull request, and the Merge button stays grey until <code class="inline">test</code> is green. The next section gives it a second reason to stay grey.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===================== 3. MODEL GATE ===================== -->
+  <section id="gate">
+    <div class="container wide">
+      <span class="section-kicker">03 — The hole only a model has</span>
+      <h2>A gate for the model</h2>
+      <p>A required <code class="inline">test</code> check stops broken code. It does nothing for a <em>worse model</em>, because the tests never ask how good the model is — only whether it loads, whether it answers, and whether a worn pump scores higher than a healthy one. A model can pass every one of those and still miss most of the pumps that are actually about to fail.</p>
+
+      <div class="callout red">
+        <div class="callout-label">The change that slips through every test</div>
+        <p>Operations says crews are visiting too many healthy pumps and asks for fewer call-outs. Someone raises the decision threshold in <code class="inline">train.py</code> from 0.3 to 0.5, retrains, updates the one test that checks the threshold, and opens a pull request. <strong>Every test passes.</strong> Nobody has asked what the change actually costs in missed failures.</p>
+      </div>
+
+      <p>The fix is a second check that scores the <em>model itself</em>, needing three things: data no model was ever trained on (<code class="inline">data/holdout.csv</code>, 5,000 labelled readings), a bar to clear (two floors, set just under today's numbers), and something to compare against (the model already on <code class="inline">main</code>). <code class="inline">evaluate.py</code> does all three.</p>
+
+      <figure class="codepanel">
+        <div class="codepanel-head">
+          <div class="codepanel-tabs"><button class="codetab" aria-selected="true">evaluate.py — the model-quality gate</button></div>
+          <button class="copy-btn" data-copy="code-evaluate">Copy</button>
+        </div>
+        <pre class="active"><code id="code-evaluate" data-lang="python">AUC_FLOOR = 0.84      # today's model scores 0.855
+RECALL_FLOOR = 0.25    # and catches 27% of failures at its threshold
+MAX_AUC_DROP = 0.01    # a new model may not score lower than main's by more than this
+
+
+def load_from_main():
+    """main's model, read out of Git without touching the working tree."""
+    d = Path(tempfile.mkdtemp())
+    for name in ("model.joblib", "meta.json"):
+        blob = subprocess.run(["git", "show", f"origin/main:model/{name}"],
+                               capture_output=True, check=True).stdout
+        (d / name).write_bytes(blob)
+    return load(d)
+
+
+def score(model, meta, X, y):
+    p = model.predict_proba(X)[:, 1]
+    flagged = p >= meta["threshold"]
+    return {"auc": roc_auc_score(y, p), "recall": flagged[y == 1].mean(), "flagged": flagged.mean()}
+
+
+def main():
+    new, new_meta = load(Path("model"))
+    old, old_meta = load_from_main()
+    X, y, _ = pumps.split(pumps.read_csv("data/holdout.csv"))
+    a, b = score(old, old_meta, X, y), score(new, new_meta, X, y)
+
+    checks = [(b["auc"] >= AUC_FLOOR, f"ROC AUC {b['auc']:.3f}, floor {AUC_FLOOR}"),
+              (b["recall"] >= RECALL_FLOOR, f"recall {b['recall']:.3f}, floor {RECALL_FLOOR}"),
+              (a["auc"] - b["auc"] <= MAX_AUC_DROP,
+               f"ROC AUC {b['auc'] - a['auc']:+.3f} against main's, may not drop more than {MAX_AUC_DROP}")]
+    if not all(ok for ok, _ in checks):
+        sys.exit(1)   # fails the CI job; the table also goes to the run's own Summary page</code></pre>
+        <figcaption><code class="inline">load_from_main</code> is the unusual part: it reads <code class="inline">main</code>'s model straight out of Git with <code class="inline">git show</code>, into a temp folder, so the branch's model and <code class="inline">main</code>'s model can be scored side by side without ever touching the working tree.</figcaption>
+      </figure>
+
+      <div class="grid cols-2">
+        <div class="card"><h4>Recall at the threshold</h4><p>The share of pumps that <em>really</em> failed which the service would have flagged — the number that matters most, because a missed failure is a burst main.</p></div>
+        <div class="card"><h4>Pumps flagged</h4><p>How many crew visits that costs — the trade-off operations is actually trying to tune.</p></div>
+      </div>
+
+      <h3>What the gate says about the threshold change</h3>
+      <p>Raising the threshold doesn't touch the model, so ROC AUC doesn't move at all. But at 0.5 the service flags far fewer pumps — and catches far fewer real failures:</p>
+
+      <div class="barchart">
+        <h5>Holdout set, 5,000 readings — main (threshold 0.3) vs. this change (threshold 0.5)</h5>
+        <div class="bsub">ROC AUC is identical (0.855 vs. 0.855) — only the threshold moved.</div>
+
+        <div class="bargroup">
+          <div class="blabel"><span>Recall at the threshold — main (0.3)</span><span class="bval">27.1%<span class="bar-verdict pass">PASS</span></span></div>
+          <div class="bar-track">
+            <div class="bar-fill" style="width:27.1%"></div>
+            <div class="bar-floor" style="left:25%" data-label="floor 25%"></div>
+          </div>
+        </div>
+        <div class="bargroup">
+          <div class="blabel"><span>Recall at the threshold — this change (0.5)</span><span class="bval">11.4%<span class="bar-verdict fail">FAIL</span></span></div>
+          <div class="bar-track">
+            <div class="bar-fill fail" style="width:11.4%"></div>
+            <div class="bar-floor" style="left:25%" data-label="floor 25%"></div>
+          </div>
+        </div>
+        <div class="bargroup">
+          <div class="blabel"><span>Pumps flagged — main (0.3)</span><span class="bval">3.8%</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:12.6%"></div></div>
+        </div>
+        <div class="bargroup">
+          <div class="blabel"><span>Pumps flagged — this change (0.5)</span><span class="bval">1.3%</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:4.3%"></div></div>
+        </div>
+      </div>
+
+      <div class="callout red">
+        <div class="callout-label">model-gate: FAIL</div>
+        <p>Crews would make about a third of the visits — and miss almost nine failures in ten. The change may still be the right business call, but it's now a decision someone makes <em>on purpose</em>, looking at these numbers, not a side effect of a green test run. A team that genuinely wants this lowers the floor in <code class="inline">evaluate.py</code> in the very same pull request, where a reviewer sees exactly what they're trading away.</p>
+      </div>
+
+      <p style="font-size:14px;">Once proven, <code class="inline">model-gate</code> joins <code class="inline">test</code> as a job the <code class="inline">deploy</code> step needs — and then joins the ruleset itself as a second required check, right alongside it. Both checks now guard <code class="inline">main</code>, one for the code and one for the model. Both still run on a checkout of the repository, though — neither has ever once looked at the built image, or the service actually running. That's the next hole.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===================== 4. ENVIRONMENTS ===================== -->
+  <section id="environments">
+    <div class="container wide">
+      <span class="section-kicker">04 — Two copies of the truth</span>
+      <h2>Two environments</h2>
+      <p>In Part 1, the last check a change got before real users was a test run on a runner — the image was built and pushed straight to production. A problem that only shows up in the built image, or only once the service is really running on ECS, reached users first. The fix every team uses is a <strong>staging environment</strong>: a second copy of the service that gets every release first, gets checked from the outside, and only then — the exact same image — reaches production.</p>
+
+      <p>Staging gets everything of its own that matters: its own cluster, its own load balancer, its own service, its own IAM role. It deliberately <em>shares</em> the network and the ECR repository with production, because production must run the exact image staging just checked.</p>
+
+      <h3>What a GitHub environment actually is</h3>
+      <p>GitHub has a place built for exactly this. An <strong>environment</strong> is a named deployment target in a repository's settings — <code class="inline">staging</code> or <code class="inline">production</code> — and it holds three kinds of things.</p>
+
+      <div class="accordion" id="envAccordion">
+        <div class="acc-item">
+          <button class="acc-head" aria-expanded="true"><span>Secrets and variables of its own</span><span class="plus"></span></button>
+          <div class="acc-panel" style="max-height:140px;"><div class="acc-panel-inner"><p>A job that names the environment sees them. Any other job in the same repository does not — so staging's role is simply invisible to a job that never opts in.</p></div></div>
+        </div>
+        <div class="acc-item">
+          <button class="acc-head" aria-expanded="false"><span>Protection rules</span><span class="plus"></span></button>
+          <div class="acc-panel"><div class="acc-panel-inner"><p><strong>Required reviewers</strong> makes the job wait until a named person approves it. <strong>Deployment branches</strong> limits which branches may deploy there at all. <strong>Prevent self-review</strong> stops the author of a change from being the one who approves its own release — left off for a solo class, a team turns it on.</p></div></div>
+        </div>
+        <div class="acc-item">
+          <button class="acc-head" aria-expanded="false"><span>A history</span><span class="plus"></span></button>
+          <div class="acc-panel"><div class="acc-panel-inner"><p>The repository page lists every deployment to each environment, with its commit and when it went out — a running audit trail with no extra tooling.</p></div></div>
+        </div>
+      </div>
+
+      <div class="callout gold">
+        <div class="callout-label">What changes outside GitHub</div>
+        <p>A job opts in with one line, <code class="inline">environment: production</code> — and that line changes the OIDC token too. In Part 1 the token's subject ended in <code class="inline">ref:refs/heads/main</code>. For a job inside an environment, it ends in <code class="inline">environment:production</code> instead. A job in <code class="inline">staging</code> can never assume the production role, whatever the workflow file says, because AWS checks the subject GitHub actually signed — and a job in <code class="inline">production</code> can't even start until a reviewer approves it.</p>
+      </div>
+
+      <h3>One role per environment, permissions pulling apart</h3>
+      <p>The trust policies differ only after the last colon. The <em>permissions</em> differ far more — staging can build, production never can.</p>
+
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Capability</th><th>Staging role</th><th>Production role</th></tr></thead>
+          <tbody>
+            <tr><td>Trust subject ends in</td><td><code class="inline">environment:staging</code></td><td><code class="inline">environment:production</code></td></tr>
+            <tr><td>Push images to ECR</td><td>Yes — builds every release</td><td><strong>No</strong> — read-only (<code class="inline">DescribeRepositories</code>, <code class="inline">DescribeImages</code>)</td></tr>
+            <tr><td>Register task definitions</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Update a service</td><td>Only <code class="inline">pump-health-staging</code> in <code class="inline">mlops-staging</code></td><td>Only <code class="inline">pump-health</code> in <code class="inline">mlops-cluster</code></td></tr>
+            <tr><td>Hand the execution role to ECS</td><td>Yes, scoped to that one role</td><td>Yes, scoped to that one role</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p style="font-size:14px;">That asymmetry is the point. If staging's credentials ever leaked, they couldn't touch production. And production's <em>own</em> job can't slip an unchecked image in either — it's physically unable to push, so it can only ever deploy something that already exists in the registry under a tag staging already vouched for.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===================== 5. STAGED RELEASE ===================== -->
+  <section id="staged-release">
+    <div class="container wide">
+      <span class="section-kicker">05 — Checked from outside, then promoted</span>
+      <h2>Staging first, then production</h2>
+      <p>Everything the new pipeline needs now exists, so here's the check it runs on staging. <code class="inline">smoke_test.py</code> talks to a <em>running</em> service over HTTP, the way a real client would — not a checkout, not a mock.</p>
+
+      <figure class="codepanel">
+        <div class="codepanel-head">
+          <div class="codepanel-tabs"><button class="codetab" aria-selected="true">smoke_test.py</button></div>
+          <button class="copy-btn" data-copy="code-smoke">Copy</button>
+        </div>
+        <pre class="active"><code id="code-smoke" data-lang="python">WAIT_SECONDS = 300
+
+def main(url, sha):
+    start, in_a_row, seen = time.time(), 0, "nothing"
+    while in_a_row < 3:
+        if time.time() - start > WAIT_SECONDS:
+            fail(f"{url} still answers with {seen} after {WAIT_SECONDS} s, not {sha[:7]}")
+        health = call(f"{url}/health")
+        seen = health["git_sha"][:7]
+        in_a_row = in_a_row + 1 if health["git_sha"] == sha else 0
+        if in_a_row < 3:
+            time.sleep(5)
+    # three answers in a row from the new commit — now check it actually works
+    if health["status"] != "ok":
+        fail(f"/health says {health['status']}")
+
+    worn, healthy = call(f"{url}/predict", WORN), call(f"{url}/predict", HEALTHY)
+    if not worn["inspect"]:
+        fail(f"a worn pump was not flagged: {worn}")
+    if healthy["inspect"]:
+        fail(f"a healthy pump was flagged: {healthy}")</code></pre>
+        <figcaption>Right after a deploy, the <em>old</em> task keeps answering until the new one passes its health checks — so the script asks every five seconds for up to five minutes, and only passes once three answers in a row come from the new commit. A version that never takes over fails loudly, with the commit it actually saw.</figcaption>
+      </figure>
+
+      <h3>The pipeline's shape: one build, two deploys</h3>
+      <div class="diagram-frame">
+        <svg viewBox="0 0 980 300" width="980" height="300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pipeline diagram: test and model-gate feed into staging, which builds, pushes, deploys and smoke-tests; staging feeds into production, which waits for a reviewer, then deploys the already-built image and smoke-tests it again.">
+          <defs><marker id="arr3" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#d6ad54"/></marker></defs>
+
+          <rect x="20" y="20" width="130" height="50" rx="8" fill="#1c1c1e" stroke="#2b2b2d"/>
+          <text x="85" y="49" fill="#ecebe7" font-size="12" text-anchor="middle" font-weight="700">test</text>
+          <rect x="20" y="85" width="130" height="50" rx="8" fill="#1c1c1e" stroke="#2b2b2d"/>
+          <text x="85" y="114" fill="#ecebe7" font-size="12" text-anchor="middle" font-weight="700">model-gate</text>
+
+          <line x1="150" y1="45" x2="238" y2="80" stroke="#8a8a85" stroke-width="1.3" marker-end="url(#arr3)"/>
+          <line x1="150" y1="110" x2="238" y2="90" stroke="#8a8a85" stroke-width="1.3" marker-end="url(#arr3)"/>
+
+          <rect x="240" y="30" width="230" height="140" rx="10" fill="#161617" stroke="#d6ad54" stroke-opacity="0.55"/>
+          <text x="355" y="54" fill="#f0c878" font-size="12.5" text-anchor="middle" font-weight="700">staging</text>
+          <text x="355" y="73" fill="#aeaaa1" font-size="9.5" text-anchor="middle">environment: staging</text>
+          <text x="355" y="94" fill="#aeaaa1" font-size="9.5" text-anchor="middle">build · push · deploy</text>
+          <text x="355" y="112" fill="#aeaaa1" font-size="9.5" text-anchor="middle">smoke test (from outside)</text>
+          <text x="355" y="130" fill="#aeaaa1" font-size="9.5" text-anchor="middle">wait for old task to go</text>
+          <text x="355" y="154" fill="#79756d" font-size="9" text-anchor="middle">only if ref == main</text>
+
+          <line x1="470" y1="100" x2="548" y2="100" stroke="#d6ad54" stroke-width="1.6" marker-end="url(#arr3)"/>
+          <text x="509" y="88" fill="#79756d" font-size="9" text-anchor="middle">needs: staging</text>
+
+          <rect x="550" y="30" width="150" height="140" rx="10" fill="#1c1c1e" stroke="#3a3a3c" stroke-dasharray="4 3"/>
+          <text x="625" y="60" fill="#ecebe7" font-size="12" text-anchor="middle" font-weight="700">Approval</text>
+          <text x="625" y="80" fill="#79756d" font-size="9.5" text-anchor="middle">production waits</text>
+          <text x="625" y="95" fill="#79756d" font-size="9.5" text-anchor="middle">for a reviewer</text>
+          <text x="625" y="120" fill="#79756d" font-size="9" text-anchor="middle">concurrency:</text>
+          <text x="625" y="134" fill="#79756d" font-size="9" text-anchor="middle">production</text>
+
+          <line x1="700" y1="100" x2="758" y2="100" stroke="#d6ad54" stroke-width="1.6" marker-end="url(#arr3)"/>
+
+          <rect x="760" y="30" width="200" height="140" rx="10" fill="#161617" stroke="#d6ad54" stroke-opacity="0.55"/>
+          <text x="860" y="54" fill="#f0c878" font-size="12.5" text-anchor="middle" font-weight="700">production</text>
+          <text x="860" y="73" fill="#aeaaa1" font-size="9.5" text-anchor="middle">environment: production</text>
+          <text x="860" y="94" fill="#aeaaa1" font-size="9.5" text-anchor="middle">find image by commit tag</text>
+          <text x="860" y="112" fill="#aeaaa1" font-size="9.5" text-anchor="middle">deploy · no build, no test</text>
+          <text x="860" y="130" fill="#aeaaa1" font-size="9.5" text-anchor="middle">smoke test · wait for old task</text>
+        </svg>
+        <p class="diagram-caption">One build happens, in <code class="inline">staging</code>. Production only ever finds and deploys the image that already passed — by its immutable commit tag.</p>
+      </div>
+
+      <div class="grid cols-2">
+        <div class="card"><h4>Why no <code class="inline">wait-for-service-stability</code> here</h4><p>The smoke test does the waiting itself, and gives a far better answer: it fails with the <em>commit it actually saw</em>, where the action's built-in wait could only time out or report a generic rollback.</p></div>
+        <div class="card"><h4>Why one more wait, at the very end</h4><p>The smoke test passes the instant the new task answers — but ECS keeps the old task in the load balancer for roughly another minute, still serving some requests. So the last step in both jobs explicitly waits until only the new version answers.</p></div>
+        <div class="card"><h4><code class="inline">concurrency: production</code></h4><p>Allows only one job in that group at a time. Two merges close together queue their production releases rather than ever deploying over each other.</p></div>
+        <div class="card"><h4>One build, two deploys</h4><p>ECR ends up holding <em>one</em> image per release, not one per environment — production never rebuilds, so it can never run something staging didn't check.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===================== 6. ROLLBACK ===================== -->
+  <section id="rollback">
+    <div class="container wide">
+      <span class="section-kicker">06 — A fast way back</span>
+      <h2>Rolling back on purpose</h2>
+      <p>Every check so far runs <em>before</em> a release. Some problems only show up after one — a model that starts fine but gives answers crews find wrong, or a change that breaks a client nobody tested against. The circuit breaker can't help, because nothing crashed. A revert through a pull request is the right long-term fix, but it goes through the whole pipeline and a review — several minutes, while production keeps doing damage right now.</p>
+
+      <p>What makes a fast way back possible is something the pipeline already guarantees: every release is an image tagged with its commit, in a registry where tags never change, and every one of those images already passed staging on its way out. So going back just means deploying an image that <em>already passed</em> — no build, no tests.</p>
+
+      <div class="pair-compare">
+        <div class="card" style="border-color:var(--border);">
+          <span class="section-kicker" style="margin-bottom:6px;">A normal release</span>
+          <ul style="font-size:13.6px;margin-bottom:0;padding-left:18px;">
+            <li>Build the image for this commit</li>
+            <li>Push it to ECR</li>
+            <li>Deploy to staging, smoke test</li>
+            <li>Wait for a reviewer's approval</li>
+            <li>Deploy the same tag to production</li>
+          </ul>
+        </div>
+        <span class="vs">vs.</span>
+        <div class="card" style="border-color:var(--gold-line);background:linear-gradient(180deg,var(--gold-soft),var(--surface) 70%);">
+          <span class="section-kicker" style="margin-bottom:6px;">rollback.yml</span>
+          <ul style="font-size:13.6px;margin-bottom:0;padding-left:18px;">
+            <li><strong>No build.</strong> Find an existing image by the commit it was built from</li>
+            <li>Deploy straight to production</li>
+            <li>Smoke test, same as always</li>
+            <li>Still waits for the same reviewer</li>
+          </ul>
+        </div>
+      </div>
+
+      <p>Started by hand from the Actions tab, with one typed input — the full commit SHA to go back to:</p>
+      <figure class="codepanel">
+        <div class="codepanel-head">
+          <div class="codepanel-tabs"><button class="codetab" aria-selected="true">.github/workflows/rollback.yml</button></div>
+          <button class="copy-btn" data-copy="code-rollback">Copy</button>
+        </div>
+        <pre class="active"><code id="code-rollback" data-lang="yaml">name: Roll back production
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit SHA of the release to go back to
+        required: true
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment:
+      name: production                          # same role, same reviewer
+      url: ${{ vars.PRODUCTION_URL }}
+    concurrency: production
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      # Typed text goes through an environment variable, never straight into a script.
+      SHA: ${{ inputs.sha }}
+    steps:
+      - name: Get AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+      - name: Find the image for that commit
+        run: |
+          aws ecr describe-images --repository-name pump-health \
+            --image-ids imageTag="$SHA" >/dev/null
+          echo "image=...:$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to production
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with: { task-definition: "...", cluster: mlops-cluster, service: pump-health }
+
+      - name: Smoke test production
+        run: python smoke_test.py "${{ vars.PRODUCTION_URL }}" "$SHA"</code></pre>
+        <figcaption>One line needs care: the typed commit reaches the script only as the environment variable <code class="inline">SHA</code>, never pasted straight into a <code class="inline">run:</code> line as <code class="inline">${{ inputs.sha }}</code> — GitHub substitutes expressions into the script's text before bash runs it, so unsanitized typed input there becomes part of the script itself.</figcaption>
+      </figure>
+
+      <div class="callout gold">
+        <div class="callout-label">A rollback is never the whole fix</div>
+        <p>It runs in <code class="inline">production</code>, so it uses the same role and waits for the same approval, and <code class="inline">concurrency: production</code> keeps it from racing a real release. But <code class="inline">main</code> still holds the change that got rolled back from — so <strong>the very next merge releases it again</strong>, together with whatever else that merge brings. A rollback buys time. A revert or a fix merged to <code class="inline">main</code> is what actually finishes the job.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===================== 7. NOTIFY ===================== -->
+  <section id="notify">
+    <div class="container wide">
+      <span class="section-kicker">07 — Closing the last hole</span>
+      <h2>Being told when it breaks</h2>
+      <p>A pull request's checks are seen by its reviewer. A run on <code class="inline">main</code> has no reviewer — it starts after a merge, once the author has usually moved on, and if it fails the only sign is a red cross on the Actions tab. GitHub does email whoever started the run, but that's one person, and the mail looks like every other GitHub notification.</p>
+      <p>A better place for a failure is wherever the team already tracks work — here, a GitHub issue, opened automatically by one more job at the end of the pipeline.</p>
+
+      <figure class="codepanel">
+        <div class="codepanel-head">
+          <div class="codepanel-tabs"><button class="codetab" aria-selected="true">pipeline.yml — notify job</button></div>
+          <button class="copy-btn" data-copy="code-notify">Copy</button>
+        </div>
+        <pre class="active"><code id="code-notify" data-lang="yaml">  notify:
+    needs: [test, model-gate, staging, production]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open an issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --title "Pipeline failed on main at ${GITHUB_SHA::7}" --body "$(cat &lt;&lt;EOF
+          | job | result |
+          |---|---|
+          | test | ${{ needs.test.result }} |
+          | model-gate | ${{ needs.model-gate.result }} |
+          | staging | ${{ needs.staging.result }} |
+          | production | ${{ needs.production.result }} |
+          EOF
+          )"</code></pre>
+        <figcaption><code class="inline">failure()</code> is true when any job this one needs, directly or further up the chain, failed — without it, a job with <code class="inline">needs:</code> only ever runs when there's nothing to report, since it's skipped the moment something upstream fails. <code class="inline">needs.&lt;job&gt;.result</code> is <code class="inline">success</code>, <code class="inline">failure</code>, <code class="inline">skipped</code> or <code class="inline">cancelled</code>, so the issue says exactly where the run stopped. <code class="inline">gh</code>, GitHub's own CLI, is already on the runner and signs in with the job's own token.</figcaption>
+      </figure>
+      <p style="font-size:14px;">Teams on Slack or Teams use the same shape with a different last step — one that posts to a chat webhook stored as a secret instead. What stays the same is a job that runs only on failure, and tells people exactly where to look.</p>
+
+      <h3>8.1 — The bug Part 1 couldn't catch, caught this time</h3>
+      <p>Here's the exact change from the end of Part 1 that no unit test could ever see: someone adds <code class="inline">**/*.joblib</code> to <code class="inline">.dockerignore</code> to keep a large local model file out of the build — and it also excludes <code class="inline">model/model.joblib</code>, the one the service actually needs. The tests pass, because they run on the checkout, where the file still exists. The gate passes, for the same reason.</p>
+
+      <div class="compare">
+        <div class="side old">
+          <span class="tag">Part 1 — no staging</span>
+          <h4 style="color:var(--text-dimmer);">Reached production</h4>
+          <p style="font-size:14px;">Every check green, the image silently missing its model, tasks crashing in the background while the pipeline reported success. Nobody told until someone happened to check <code class="inline">git_sha</code>.</p>
+        </div>
+        <div class="side new">
+          <span class="tag">Part 2 — staging first</span>
+          <h4>Stopped at staging</h4>
+          <p style="font-size:14px;">After six minutes, the smoke test gives up waiting and fails loudly, with the exact commit it actually saw. Production is never touched. <code class="inline">notify</code> opens an issue with no one watching.</p>
+        </div>
+      </div>
+
+      <div class="log">Run python smoke_test.py "http://pump-health-staging-alb-…" "19b9f4d6…"
+FAIL http://pump-health-staging-alb-… still answers with 53f39dd after 300 s, not 19b9f4d
+Error: Process completed with exit code 1.</div>
+      <p style="font-size:14px;">The fix is the usual one: <code class="inline">git revert -m 1</code> on the merge commit, through a pull request whose description reads <code class="inline">Closes #&lt;issue&gt;</code> — so merging the fix closes the issue in the same motion. The release path is now complete: every change is reviewed, tested, gated, tried on staging, approved, and checked again — and a failure reaches the team on its own, without anyone having to be watching.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===================== 8. BLIND SPOT ===================== -->
+  <section id="blindspot">
+    <div class="container wide">
+      <span class="section-kicker">08 — The one thing still unguarded</span>
+      <h2>What no check here can see</h2>
+      <p>Every check built in this post looks at something the team controls. The tests look at the code. The gate looks at the model, against a holdout set that <em>never changes</em>. The smoke test looks at the running image. Not one of them ever looks at the pumps themselves.</p>
+
+      <div class="callout red">
+        <div class="callout-label">A scenario nothing here would catch</div>
+        <p>The utility opens a new station next month. Its pumps are the same kind, but its vibration sensors are a different make, reporting less than half of what the old ones do — and vibration is one of the readings this model leans on most. At that station, a pump shaking itself apart looks perfectly calm to the model, so the service flags almost none of the pumps actually about to fail.</p>
+      </div>
+
+      <p>Nothing in this session would notice. The code hasn't changed, so the tests pass. The holdout set has no readings from the new station, so the gate passes. The service answers every request with <code class="inline">status: ok</code>, so the smoke test passes and <code class="inline">notify</code> never fires. Averaged across every station, the overall numbers might dip only slightly — while at the new station the model is close to useless. The first real sign would be a burst main.</p>
+
+      <h3>What closes this — later in the course</h3>
+      <div class="accordion" id="blindspotAccordion">
+        <div class="acc-item">
+          <button class="acc-head" aria-expanded="true"><span>Continuous monitoring</span><span class="plus"></span></button>
+          <div class="acc-panel" style="max-height:130px;"><div class="acc-panel-inner"><p>Compares the live model's answers against what actually happened, once real outcomes are known — checking each station <em>on its own</em>, because one broken group can hide inside a healthy overall average.</p></div></div>
+        </div>
+        <div class="acc-item">
+          <button class="acc-head" aria-expanded="false"><span>Data drift and bias checks</span><span class="plus"></span></button>
+          <div class="acc-panel"><div class="acc-panel-inner"><p>Watch the <em>inputs</em> rather than waiting for outcomes — drift can warn before any failures ever arrive, and bias checks catch a model quietly serving some groups worse than others.</p></div></div>
+        </div>
+        <div class="acc-item">
+          <button class="acc-head" aria-expanded="false"><span>Continuous training</span><span class="plus"></span></button>
+          <div class="acc-panel"><div class="acc-panel-inner"><p>The fix that follows a caught drift — training a new model on the world as it actually is now, rather than the world as it was on the day the current model was trained.</p></div></div>
+        </div>
+      </div>
+
+      <div class="callout gold">
+        <div class="callout-label">Why the solid row had to come first</div>
+        <p>A retrained model gets <strong>no shortcut</strong>. It arrives as an ordinary pull request and passes the exact same tests, the same gate, staging and a person's approval as any other change. A retrain that deployed itself would put an unreviewed model straight into production — the release path built in this post is precisely what makes automatic retraining safe to switch on at all.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===================== 9. WHAT GOES WRONG ===================== -->
+  <section id="failures">
+    <div class="container wide">
+      <span class="section-kicker">09 — Reading failure</span>
+      <h2>What goes wrong</h2>
+      <p>Most of this setup's failures were already shown where they belong — a red model gate, a staging deploy that never took over. A few more come specifically with rulesets and environments, and the first is the most confusing one to meet.</p>
+
+      <div class="fail-tabs" id="failTabs" role="tablist">
+        <button class="fail-tab" role="tab" aria-selected="true" data-fail="g1"><span class="fi"></span>A required check that never reports</button>
+        <button class="fail-tab" role="tab" aria-selected="false" data-fail="g2"><span class="fi"></span>Nobody's fault</button>
+        <button class="fail-tab" role="tab" aria-selected="false" data-fail="g3"><span class="fi"></span>Approving an old run</button>
+        <button class="fail-tab" role="tab" aria-selected="false" data-fail="g4"><span class="fi"></span>A secret that's not there</button>
+      </div>
+
+      <div class="fail-panel active" id="g1">
+        <h3 style="margin-top:0;">A required check that never reports</h3>
+        <p>The ruleset requires a check literally named <code class="inline">test</code> — which is the job's <em>ID</em> in <code class="inline">pipeline.yml</code>, unless the job has a <code class="inline">name:</code> of its own. Someone decides the check list would read better with a human name, and adds one: <code class="inline">name: unit tests</code> under the <code class="inline">test</code> job.</p>
+        <p>The job itself runs and passes — now listed as <strong>Pipeline / unit tests</strong>. And the pull request is stuck forever.</p>
+        <div class="fail-meta">
+          <div class="fm"><div class="fm-label">What actually happened</div><p><code class="inline">test</code> shows as <strong>Expected — Waiting for status to be reported</strong>, and it waits forever, because a check with that exact name no longer exists. Nothing is red, so nothing even looks wrong.</p></div>
+          <div class="fm"><div class="fm-label">The fix</div><p>Change the ruleset in the same breath as the job name — or don't rename the job at all. The same trap catches a workflow given <code class="inline">paths-ignore</code>: a pull request touching only docs runs no workflow, so its required checks never report either.</p></div>
+        </div>
+      </div>
+
+      <div class="fail-panel" id="g2">
+        <h3 style="margin-top:0;">A failure that's nobody's fault</h3>
+        <p>A release fails inside the staging job's <strong>Build and push the image</strong> step — <code class="inline">pip</code> times out downloading a package from PyPI (<code class="inline">Read timed out</code>).</p>
+        <div class="fail-meta">
+          <div class="fm"><div class="fm-label">What actually happened</div><p>Nothing is wrong with the change itself — a transient network hiccup during download. <code class="inline">notify</code> opens an issue anyway, because from the pipeline's point of view a failure is a failure.</p></div>
+          <div class="fm"><div class="fm-label">The fix</div><p><strong>Re-run failed jobs</strong> on the run. Pinned versions decide <em>what</em> gets installed, never whether the download itself succeeds — a team that sees this often enough caches packages or installs from its own mirror. Read the log before blaming the change, and close the issue with a note saying what it actually was.</p></div>
+        </div>
+      </div>
+
+      <div class="fail-panel" id="g3">
+        <h3 style="margin-top:0;">Approving an old run</h3>
+        <p>Two merges land close together. Both production jobs wait for approval — and approving the <em>older</em> one after the newer one is already waiting would put production back on an older commit.</p>
+        <div class="fail-meta">
+          <div class="fm"><div class="fm-label">What protects against it</div><p><code class="inline">concurrency: production</code> makes production jobs take turns, and GitHub's documented rule is that a newer pending job in a group cancels an older one that hasn't started yet.</p></div>
+          <div class="fm"><div class="fm-label">Still worth doing</div><p>Test this against your own org's concurrency rules before relying on it blindly — and read the commit shown on the review screen before pressing approve, every time.</p></div>
+        </div>
+      </div>
+
+      <div class="fail-panel" id="g4">
+        <h3 style="margin-top:0;">A secret that's not there</h3>
+        <p>An environment's secret exists only for jobs that explicitly name that environment. A job that forgets the <code class="inline">environment:</code> line gets back an empty <code class="inline">secrets.AWS_ROLE_ARN</code>.</p>
+        <div class="fail-meta">
+          <div class="fm"><div class="fm-label">The loud version</div><p>With the old repository-level secret deleted (as this setup does in section 4), the AWS step fails outright asking for a role — impossible to miss.</p></div>
+          <div class="fm"><div class="fm-label">The quiet version</div><p>If a stale repository secret is ever left behind instead of deleted, the job could quietly succeed using the <em>wrong</em> role — which is exactly why the old one gets deleted, not just superseded.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===================== 10. TEARDOWN ===================== -->
+  <section id="teardown">
+    <div class="container">
+      <span class="section-kicker">10 — Housekeeping</span>
+      <h2>Tearing it all down</h2>
+      <p>Everything goes, in both environments — the load balancers, clusters, services, the OIDC provider, both deploy roles, the network. Each teardown check filters by the names this session used, since a shared AWS account can easily hold other people's resources too.</p>
+      <div class="callout gold">
+        <div class="callout-label">What's worth leaving behind</div>
+        <p>The GitHub side costs nothing to keep: the ruleset, the two environments and the workflows stay as a record of exactly how the release path was set up. The shared <code class="inline">ecsTaskExecutionRole</code> is left in place too, as in Part 1 — only the personal access token from section 1 needs deleting by hand.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 11. SUMMARY ===================== -->
+  <section id="summary">
+    <div class="container">
+      <span class="section-kicker">11 — The short version</span>
+      <h2>Key takeaways</h2>
+      <p>Part 1 built a pipeline that tests and deploys. This post made it safe to trust — and the work splits cleanly into <em>before</em> a release and <em>during</em> one.</p>
+      <p><strong>Before a release</strong>, GitHub enforces the rules. A ruleset on <code class="inline">main</code> refuses direct pushes and holds every pull request until two named checks pass: <code class="inline">test</code>, for the code, and <code class="inline">model-gate</code>, which scores the change's model on a fixed holdout set no model ever trains on, compared against the model already on <code class="inline">main</code>. That gate alone caught a threshold change every single test passed — one that would have missed almost nine failing pumps in ten.</p>
+      <p><strong>During a release</strong>, the image is built exactly once and meets two environments in strict order. <code class="inline">staging</code> builds, pushes and deploys to a copy of the service, then a smoke test checks it from the outside until the new commit genuinely answers. <code class="inline">production</code> waits for a reviewer, then deploys that same image by its immutable tag — never rebuilding. Each environment carries its own secret and its own IAM role, and each role trusts only the OIDC tokens of its own environment, so staging can never reach production. The exact model-missing bug Part 1 let straight through stopped cleanly at staging this time.</p>
+      <blockquote>A rollback is never the whole fix. <code class="inline">main</code> still holds whatever got rolled back from, so the very next merge releases it again — a revert or a fix on <code class="inline">main</code> is what actually finishes the job.</blockquote>
+      <p>When a run on <code class="inline">main</code> fails, <code class="inline">notify</code> opens an issue, so a red run always finds an owner. And what none of it sees is the model <em>after</em> release — every check here looks at code, a fixed holdout, or a running image, while the world the model actually scores keeps moving underneath it. Catching that drift is continuous monitoring; fixing it is continuous training — both arrive later in the course, and both plug into this exact release path rather than going around it. A retrained model will walk in as an ordinary pull request, and clear the same tests, the same gate, the same staging, and the same approval as anything else.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===================== 12. REFERENCES ===================== -->
+  <section id="refs">
+    <div class="container wide">
+      <span class="section-kicker">12 — Further reading</span>
+      <h2>References</h2>
+
+      <div class="grid cols-2">
+        <div class="ref-group">
+          <h4>Protecting branches &amp; releases</h4>
+          <ul class="ref-list">
+            <li><a href="https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets" target="_blank" rel="noopener">About rulesets</a><span class="d">And the full list of rules available to them</span></li>
+            <li><a href="https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments" target="_blank" rel="noopener">Deployments and environments</a><span class="d">Required reviewers, deployment branches, environment secrets</span></li>
+            <li><a href="https://docs.github.com/en/actions/concepts/security/openid-connect" target="_blank" rel="noopener">OpenID Connect in GitHub Actions</a><span class="d">The token's subject, including the environment: form</span></li>
+            <li><a href="https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency" target="_blank" rel="noopener">Control the concurrency of workflows and jobs</a></li>
+          </ul>
+        </div>
+        <div class="ref-group">
+          <h4>Writing the workflows</h4>
+          <ul class="ref-list">
+            <li><a href="https://docs.github.com/en/actions/reference/security/secure-use#good-practices-for-mitigating-script-injection-attacks" target="_blank" rel="noopener">Security hardening — script injection</a><span class="d">Why typed input goes through an environment variable</span></li>
+            <li><a href="https://cli.github.com/manual/" target="_blank" rel="noopener">GitHub CLI manual</a><span class="d"><code class="inline" style="white-space:normal;">gh issue</code>, <code class="inline" style="white-space:normal;">gh pr</code> and <code class="inline" style="white-space:normal;">gh workflow</code></span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="ref-group" style="margin-top:4px;">
+        <h4>Releasing models, and what comes after</h4>
+        <ul class="ref-list">
+          <li><a href="https://cloud.google.com/architecture/mlops-continuous-delivery-and-automation-pipelines-in-machine-learning" target="_blank" rel="noopener">Google Cloud — MLOps: continuous delivery and automation pipelines in machine learning</a><span class="d">The levels of automation, from manual to continuous training</span></li>
+          <li><a href="https://martinfowler.com/articles/cd4ml.html" target="_blank" rel="noopener">Martin Fowler — Continuous Delivery for Machine Learning</a><span class="d">Model gates, deployment and monitoring as one pipeline</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="container">
+    <div class="fbrand"><span class="dot"></span>CI/CD Part 2 Post Read</div>
+    <p>Still ahead, later in the course: continuous monitoring, data drift and bias checks, and continuous training — plugged into the exact release path built here.</p>
+    <button class="back-top" id="backTop">Back to top ↑</button>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---- progress bar ---- */
+  var progress = document.getElementById('progress');
+  function updateProgress(){
+    var h = document.documentElement;
+    var scrolled = h.scrollTop;
+    var max = h.scrollHeight - h.clientHeight;
+    progress.style.width = (max > 0 ? (scrolled/max*100) : 0) + '%';
+  }
+  document.addEventListener('scroll', updateProgress, {passive:true});
+  updateProgress();
+
+  /* ---- TOC panel ---- */
+  var tocToggle = document.getElementById('tocToggle');
+  var tocPanel = document.getElementById('tocPanel');
+  var tocClose = document.getElementById('tocClose');
+  function openToc(){ tocPanel.classList.add('open'); tocToggle.setAttribute('aria-expanded','true'); }
+  function closeToc(){ tocPanel.classList.remove('open'); tocToggle.setAttribute('aria-expanded','false'); }
+  tocToggle.addEventListener('click', openToc);
+  tocClose.addEventListener('click', closeToc);
+  tocPanel.addEventListener('click', function(e){ if(e.target === tocPanel) closeToc(); });
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeToc(); });
+  document.querySelectorAll('#tocList a').forEach(function(a){
+    a.addEventListener('click', closeToc);
+  });
+
+  /* scroll-spy: bold current section in TOC */
+  var tocLinks = Array.prototype.slice.call(document.querySelectorAll('#tocList a'));
+  var sections = tocLinks.map(function(a){ return document.querySelector(a.getAttribute('href')); }).filter(Boolean);
+  if('IntersectionObserver' in window){
+    var spy = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        var id = '#' + entry.target.id;
+        var link = tocLinks.find(function(a){ return a.getAttribute('href') === id; });
+        if(link){ link.classList.toggle('current', entry.isIntersecting); }
+      });
+    }, {rootMargin:'-20% 0px -70% 0px'});
+    sections.forEach(function(s){ spy.observe(s); });
+  }
+
+  /* ---- back to top ---- */
+  document.getElementById('backTop').addEventListener('click', function(){
+    window.scrollTo({top:0, behavior:'smooth'});
+  });
+
+  /* ---- objectives checklist ---- */
+  document.querySelectorAll('.obj').forEach(function(o){
+    function toggle(){
+      var done = o.classList.toggle('done');
+      o.setAttribute('aria-checked', done ? 'true' : 'false');
+    }
+    o.addEventListener('click', toggle);
+    o.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); toggle(); } });
+  });
+
+  /* ---- accordions ---- */
+  document.querySelectorAll('.acc-head').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var panel = btn.nextElementSibling;
+      var open = btn.getAttribute('aria-expanded') === 'true';
+      btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+      panel.style.maxHeight = open ? '0px' : (panel.scrollHeight + 'px');
+    });
+  });
+  window.addEventListener('load', function(){
+    document.querySelectorAll('.acc-head[aria-expanded="true"]').forEach(function(btn){
+      var panel = btn.nextElementSibling;
+      panel.style.maxHeight = panel.scrollHeight + 'px';
+    });
+  });
+
+  /* ---- failure tabs ---- */
+  var failTabs = document.querySelectorAll('.fail-tab');
+  failTabs.forEach(function(tab){
+    tab.addEventListener('click', function(){
+      failTabs.forEach(function(t){ t.setAttribute('aria-selected','false'); });
+      document.querySelectorAll('.fail-panel').forEach(function(p){ p.classList.remove('active'); });
+      tab.setAttribute('aria-selected','true');
+      document.getElementById(tab.dataset.fail).classList.add('active');
+    });
+  });
+
+  /* ---- code tab switching (multi-pane code panels) ---- */
+  document.querySelectorAll('.codepanel').forEach(function(panel){
+    var tabs = panel.querySelectorAll('.codetab[data-target]');
+    if(!tabs.length) return;
+    tabs.forEach(function(tab){
+      tab.addEventListener('click', function(){
+        tabs.forEach(function(t){ t.setAttribute('aria-selected','false'); });
+        panel.querySelectorAll('pre[data-pane]').forEach(function(p){ p.classList.remove('active'); });
+        tab.setAttribute('aria-selected','true');
+        panel.querySelector('pre[data-pane="'+tab.dataset.target+'"]').classList.add('active');
+      });
+    });
+  });
+
+  /* ---- copy buttons ---- */
+  document.querySelectorAll('.copy-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var panel = btn.closest('.codepanel');
+      var codeEl = btn.dataset.copy ? document.getElementById(btn.dataset.copy) : panel.querySelector('pre.active code');
+      var text = codeEl ? codeEl.textContent : '';
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(function(){
+          var old = btn.textContent; btn.textContent = 'Copied';
+          setTimeout(function(){ btn.textContent = old; }, 1400);
+        }).catch(function(){
+          var old = btn.textContent; btn.textContent = 'Press Ctrl/Cmd+C';
+          setTimeout(function(){ btn.textContent = old; }, 1600);
+        });
+      }
+    });
+  });
+
+  /* ---- lightweight syntax highlighting ---- */
+  function escapeHtml(s){
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function highlight(raw, lang){
+    var esc = escapeHtml(raw);
+    if(lang === 'yaml'){
+      esc = esc.replace(/(\$\{\{[^}]*\}\})/g, '<span class="tok-expr">$1</span>');
+      esc = esc.replace(/^(\s*)([A-Za-z0-9_.\-]+)(:)(?=\s|$)/gm, '$1<span class="tok-key">$2</span>$3');
+      esc = esc.replace(/(&quot;[^&\n]*?&quot;)/g, '<span class="tok-string">$1</span>');
+      esc = esc.replace(/^(\s*#.*)$/gm, '<span class="tok-comment">$1</span>');
+    } else if(lang === 'python'){
+      esc = esc.replace(/\b(def|import|from|class|with|as|return|assert|yield|is|in|for|if|not|while|True|False)\b/g, '<span class="tok-kw">$1</span>');
+      esc = esc.replace(/(&quot;[^&\n]*?&quot;)/g, '<span class="tok-string">$1</span>');
+      esc = esc.replace(/^(\s*#.*)$/gm, '<span class="tok-comment">$1</span>');
+    } else if(lang === 'bash'){
+      esc = esc.replace(/^(\s*#.*)$/gm, '<span class="tok-comment">$1</span>');
+    }
+    return esc;
+  }
+  document.querySelectorAll('code[data-lang]').forEach(function(codeEl){
+    var raw = codeEl.textContent;
+    var lang = codeEl.dataset.lang;
+    codeEl.innerHTML = highlight(raw, lang);
+  });
+})();
+</script>
+</body>
+</html>
